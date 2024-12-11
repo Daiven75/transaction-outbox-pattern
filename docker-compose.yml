@@ -1,0 +1,116 @@
+services:
+  postgres:
+    image: postgres:15.4
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: flight_db
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 7s
+      retries: 5
+
+  mysql:
+    image: mysql:8.0.33
+    environment:
+      MYSQL_ROOT_PASSWORD: mysql
+      MYSQL_DATABASE: passenger_db
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 7s
+      retries: 5
+
+  zookeeper:
+    image: wurstmeister/zookeeper:latest
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: wurstmeister/kafka:latest
+    environment:
+      KAFKA_ADVERTISED_LISTENERS: INSIDE://kafka:9093,OUTSIDE://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INSIDE:PLAINTEXT,OUTSIDE:PLAINTEXT
+      KAFKA_LISTENERS: INSIDE://0.0.0.0:9093,OUTSIDE://0.0.0.0:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INSIDE
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_CREATE_TOPICS_SEPARATOR: "$$'\n'"
+      KAFKA_CREATE_TOPICS: |
+        mysql.passenger_db.passenger_outbox:1:1
+        connect-configs:1:1:compact
+        connect-offsets:1:1:compact
+        connect-status:1:1:compact
+        schema-changes.db:1:1:compact
+        schema-history:1:1
+    ports:
+      - "9092:9092"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      - zookeeper
+
+  connect:
+    build:
+      context: kafka-connect
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: 'kafka:9093'
+      CONNECT_REST_PORT: 8083
+      CONNECT_GROUP_ID: kafka-connect
+      CONNECT_CONFIG_STORAGE_TOPIC: connect-configs
+      CONNECT_OFFSET_STORAGE_TOPIC: connect-offsets
+      CONNECT_STATUS_STORAGE_TOPIC: connect-status
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_INTERNAL_KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_INTERNAL_VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_PLUGIN_PATH: /usr/share/java,/usr/share/confluent-hub-components,/data/connect-jars,/etc/kafka-connect/jars
+      CONNECT_REST_ADVERTISED_HOST_NAME: "kafka-connect"
+      CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: false
+    ports:
+      - "8083:8083"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  flight-service:
+    build:
+      context: flight-service
+    restart: on-failure
+    ports:
+      - "8888:8888"
+    environment:
+      ENV: docker
+      DB.HOST: postgres
+      KAFKA.BROKER: 'kafka:9093'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  passenger-service:
+    build:
+      context: passenger-service
+    restart: on-failure
+    ports:
+      - "8887:8887"
+    environment:
+      ENV: docker
+      DB.HOST: mysql
+    depends_on:
+      mysql:
+        condition: service_healthy
