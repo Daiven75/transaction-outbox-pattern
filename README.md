@@ -35,6 +35,30 @@ $ docker-compose up -d
 
 ```
 
+#### Creating a flight
+```bash
+curl -iX POST "http://localhost:8888/flights" -d "{\"company\":\"Company-1\",\"origin\":\"ABC\",\"destination\":\"DEF\"}"
+```
+
+#### Creating and linking a passenger to the flight
+```bash
+curl -iX POST "http://localhost:8887/passengers" -d "{\"first_name\":\"passenger-1\",\"plan_type\":\"DEFAULT\",\"dispatch\":\"false\",\"flight_id\":\1\}"
+```
+
+#### Searching all flights
+```bash
+curl -i "http://localhost:8888/flights"
+```
+
+#### [PLUS] Kafka connect provides an API, and in it, we can query the previously installed connector
+```bash
+# Search for all installed connectors
+curl -i "http://localhost:8083/connectors"
+
+# Displays existing connector configuration details
+curl -i "http://localhost:8083/connectors/mysql-source-connector"
+```
+
 ## How about we chat?
 
 Made by Lucas Silva 👋🏽 [Contact](https://www.linkedin.com/in/lucas-silva-959102169)
